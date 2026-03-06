@@ -1,11 +1,6 @@
-import {
-  HttpOptions,
-  HttpParams,
-  HttpHeaders,
-  PluginListenerHandle,
-} from "@capacitor/core";
+import { HttpParams, HttpHeaders, PluginListenerHandle } from "@capacitor/core";
 
-export interface DownloadFileOptions extends HttpOptions {
+export interface DownloadFileOptions {
   /**
    * The URL to download the file from.
    * @since 1.0.0
@@ -27,6 +22,7 @@ export interface DownloadFileOptions extends HttpOptions {
   progress?: boolean;
   /**
    * The Http Request method to run. (Default is GET)
+   * Note: Request bodies (`data`) are not supported for file transfer requests.
    * @since 1.0.0
    */
   method?: string;
@@ -86,7 +82,7 @@ export interface DownloadFileResult {
   blob?: Blob;
 }
 
-export interface UploadFileOptions extends HttpOptions {
+export interface UploadFileOptions {
   /**
    * The URL to upload the file to.
    * @since 1.0.0
@@ -137,6 +133,7 @@ export interface UploadFileOptions extends HttpOptions {
   progress?: boolean;
   /**
    * The Http Request method to run. (Default is POST)
+   * Note: Request bodies (`data`) are not supported for file transfer requests.
    * @since 1.0.0
    */
   method?: string;
