@@ -22,10 +22,15 @@ export interface DownloadFileOptions {
   progress?: boolean;
   /**
    * The Http Request method to run. (Default is GET)
-   * Note: Request bodies (`data`) are not supported for file transfer requests.
    * @since 1.0.0
    */
   method?: string;
+  /**
+   * Request body to send with the HTTP request.
+   * Useful when using methods like POST or PUT for downloads.
+   * @since 1.0.0
+   */
+  data?: string;
   /**
    * URL parameters to append to the request.
    * This `HttpParams` interface comes from `@capacitor/core`.
@@ -133,7 +138,6 @@ export interface UploadFileOptions {
   progress?: boolean;
   /**
    * The Http Request method to run. (Default is POST)
-   * Note: Request bodies (`data`) are not supported for file transfer requests.
    * @since 1.0.0
    */
   method?: string;

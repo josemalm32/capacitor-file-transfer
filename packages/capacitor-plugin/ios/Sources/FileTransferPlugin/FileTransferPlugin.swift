@@ -32,6 +32,14 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func downloadFile(_ call: CAPPluginCall) {
         do {
             let prepData = try validateAndPrepare(call: call, action: .download)
+            if let requestBody = try extractRequestBody(call: call) {
+                try downloadFileWithRequestBody(
+                    call: call,
+                    prepData: prepData,
+                    requestBody: requestBody
+                )
+                return
+            }
 
             try manager.downloadFile(
                 fromServerURL: prepData.serverURL,
@@ -50,6 +58,136 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
         } catch {
             call.sendError(error, source: call.getString("url"), target: call.getString("path"))
         }
+    }
+
+    private func extractRequestBody(call: CAPPluginCall) throws -> Data? {
+        if let dataString = call.getString("data") {
+            return dataString.data(using: .utf8)
+        }
+
+        if let dataObject = call.getObject("data"),
+           JSONSerialization.isValidJSONObject(dataObject) {
+            return try JSONSerialization.data(withJSONObject: dataObject)
+        }
+
+        if let dataArray = call.getArray("data"),
+           JSONSerialization.isValidJSONObject(dataArray) {
+            return try JSONSerialization.data(withJSONObject: dataArray)
+        }
+
+        return nil
+    }
+
+    private func buildURLWithParams(call: CAPPluginCall, baseURL: URL) throws -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw FileTransferError.invalidServerUrl(baseURL.absoluteString)
+        }
+
+        let params = call.getObject("params") ?? JSObject()
+        if !params.isEmpty {
+            let shouldEncode = call.getBool("shouldEncodeUrlParams", true)
+            let queryItems = extractParams(from: params).flatMap { key, values in
+                values.map { value in
+                    URLQueryItem(name: key, value: shouldEncode ? value : value.removingPercentEncoding ?? value)
+                }
+            }
+            components.queryItems = queryItems
+        }
+
+        guard let url = components.url else {
+            throw FileTransferError.invalidServerUrl(baseURL.absoluteString)
+        }
+        return url
+    }
+
+    private func downloadFileWithRequestBody(
+        call: CAPPluginCall,
+        prepData: TransferPreparationData,
+        requestBody: Data
+    ) throws {
+        let requestURL = try buildURLWithParams(call: call, baseURL: prepData.serverURL)
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = call.getString("method") ?? defaultHTTPMethod(for: .download)
+        request.httpBody = requestBody
+        request.timeoutInterval = TimeInterval(call.getInt("connectTimeout", call.getInt("readTimeout", 60000)) / 1000)
+
+        let headers = extractHeaders(from: call.getObject("headers") ?? JSObject())
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+
+        let shouldTrackProgress = prepData.shouldTrackProgress
+        URLSession.shared.downloadTask(with: request) { temporaryURL, response, error in
+            if let error = error {
+                call.sendError(error, source: prepData.serverURL.absoluteString, target: prepData.fileURL.absoluteString)
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                call.sendError(
+                    FileTransferError.genericError(),
+                    source: prepData.serverURL.absoluteString,
+                    target: prepData.fileURL.absoluteString
+                )
+                return
+            }
+
+            let responseHeaders = httpResponse.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+                if let key = pair.key as? String, let value = pair.value as? String {
+                    result[key] = value
+                }
+            }
+
+            guard (200...299).contains(httpResponse.statusCode) else {
+                let errorBody: String? = temporaryURL.flatMap { try? String(contentsOf: $0) }
+                call.sendError(
+                    FileTransferError.httpError(
+                        responseCode: httpResponse.statusCode,
+                        message: HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
+                        responseBody: errorBody,
+                        headers: responseHeaders
+                    ),
+                    source: prepData.serverURL.absoluteString,
+                    target: prepData.fileURL.absoluteString
+                )
+                return
+            }
+
+            guard let temporaryURL else {
+                call.sendError(
+                    FileTransferError.genericError(),
+                    source: prepData.serverURL.absoluteString,
+                    target: prepData.fileURL.absoluteString
+                )
+                return
+            }
+
+            do {
+                let directory = prepData.fileURL.deletingLastPathComponent()
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+                if FileManager.default.fileExists(atPath: prepData.fileURL.path) {
+                    try FileManager.default.removeItem(at: prepData.fileURL)
+                }
+                try FileManager.default.moveItem(at: temporaryURL, to: prepData.fileURL)
+
+                if shouldTrackProgress {
+                    let fileSize = (try? FileManager.default.attributesOfItem(atPath: prepData.fileURL.path)[.size] as? NSNumber)?.intValue ?? 0
+                    self.reportProgressIfNeeded(
+                        type: .download,
+                        url: prepData.serverURL.absoluteString,
+                        bytes: fileSize,
+                        contentLength: fileSize,
+                        lengthComputable: true,
+                        shouldTrack: true,
+                        force: true
+                    )
+                }
+
+                call.resolve(["path": prepData.fileURL.path])
+            } catch {
+                call.sendError(error, source: prepData.serverURL.absoluteString, target: prepData.fileURL.absoluteString)
+            }
+        }.resume()
     }
 
     /// Uploads a file from the provided path to the specified server URL.

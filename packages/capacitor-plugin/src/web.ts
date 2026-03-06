@@ -49,6 +49,10 @@ export class FileTransferWeb extends WebPlugin implements FileTransferPlugin {
         headers,
         redirect: options.disableRedirects ? "manual" : "follow",
       };
+      const normalizedMethod = (options.method || "GET").toUpperCase();
+      if (options.data !== undefined && normalizedMethod !== "GET") {
+        requestOptions.body = options.data;
+      }
 
       const controller = new AbortController();
       const timeout = options.connectTimeout || 60000;
