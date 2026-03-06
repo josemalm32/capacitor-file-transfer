@@ -22,6 +22,7 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
         .init(selector: #selector(uploadFile), returnType: CAPPluginReturnPromise)
     ]
     private lazy var manager: IONFLTRManager = .init()
+    private lazy var urlSession: URLSession = .init(configuration: .default)
     private lazy var cancellables: Set<AnyCancellable> = []
     private var lastProgressReportTime = CACurrentMediaTime()
     private let progressUpdateInterval: TimeInterval = 0.1 // 100ms
@@ -109,7 +110,8 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
         var request = URLRequest(url: requestURL)
         request.httpMethod = call.getString("method") ?? defaultHTTPMethod(for: .download)
         request.httpBody = requestBody
-        request.timeoutInterval = TimeInterval(call.getInt("connectTimeout", call.getInt("readTimeout", 60000)) / 1000)
+        let timeoutInMillis = call.getInt("connectTimeout", call.getInt("readTimeout", 60000))
+        request.timeoutInterval = TimeInterval(timeoutInMillis / 1000)
 
         let headers = extractHeaders(from: call.getObject("headers") ?? JSObject())
         for (key, value) in headers {
@@ -117,8 +119,7 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let shouldTrackProgress = prepData.shouldTrackProgress
-        let session = URLSession(configuration: .default)
-        session.downloadTask(with: request) { temporaryURL, response, error in
+        urlSession.downloadTask(with: request) { temporaryURL, response, error in
             if let error = error {
                 call.sendError(error, source: prepData.serverURL.absoluteString, target: prepData.fileURL.absoluteString)
                 return

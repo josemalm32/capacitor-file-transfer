@@ -50,7 +50,12 @@ export class FileTransferWeb extends WebPlugin implements FileTransferPlugin {
         redirect: options.disableRedirects ? "manual" : "follow",
       };
       const normalizedMethod = (options.method || "GET").toUpperCase();
-      if (options.data !== undefined && normalizedMethod !== "GET") {
+      // Fetch does not support GET/HEAD requests with body payloads.
+      if (
+        options.data !== undefined &&
+        normalizedMethod !== "GET" &&
+        normalizedMethod !== "HEAD"
+      ) {
         requestOptions.body = options.data;
       }
 

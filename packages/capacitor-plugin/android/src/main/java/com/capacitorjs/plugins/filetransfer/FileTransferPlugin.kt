@@ -72,7 +72,7 @@ class FileTransferPlugin : Plugin() {
     private fun JSObject.toMap(): Map<String, String> {
         val map = mutableMapOf<String, String>()
         keys().forEach { key ->
-            map[key] = opt(key)?.toString().orEmpty()
+            map[key] = getString(key).orEmpty()
         }
         return map
     }
@@ -158,12 +158,12 @@ class FileTransferPlugin : Plugin() {
     private fun buildUrlWithParams(baseUrl: String, params: JSObject, shouldEncode: Boolean): String {
         if (params.length() == 0) return baseUrl
 
-        val queryParams = mutableListOf<String>()
+                val queryParams = mutableListOf<String>()
         val paramMap = params.toParamsMap()
         paramMap.forEach { (key, values) ->
             values.forEach { value ->
-                val encodedKey = if (shouldEncode) URLEncoder.encode(key, StandardCharsets.UTF_8.name()) else key
-                val encodedValue = if (shouldEncode) URLEncoder.encode(value, StandardCharsets.UTF_8.name()) else value
+                val encodedKey = if (shouldEncode) URLEncoder.encode(key, StandardCharsets.UTF_8) else key
+                val encodedValue = if (shouldEncode) URLEncoder.encode(value, StandardCharsets.UTF_8) else value
                 queryParams.add("$encodedKey=$encodedValue")
             }
         }
@@ -197,7 +197,7 @@ class FileTransferPlugin : Plugin() {
                     this.readTimeout = readTimeout
                     this.connectTimeout = connectTimeout
                     instanceFollowRedirects = !disableRedirects
-                    doOutput = body.isNotEmpty()
+                    doOutput = true
                 }
 
                 headers.toMap().forEach { (key, value) ->
