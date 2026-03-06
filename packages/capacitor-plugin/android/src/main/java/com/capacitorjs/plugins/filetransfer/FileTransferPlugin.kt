@@ -26,6 +26,16 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @CapacitorPlugin(
     name = "FileTransfer",
@@ -132,6 +142,144 @@ class FileTransferPlugin : Plugin() {
         )
     }
 
+    private fun extractRequestBody(call: PluginCall): ByteArray? {
+        val bodyValue = call.data.opt("data") ?: return null
+        val bodyString = when (bodyValue) {
+            is String -> bodyValue
+            is JSONObject,
+            is org.json.JSONArray,
+            is Number,
+            is Boolean -> bodyValue.toString()
+            else -> return null
+        }
+        return bodyString.toByteArray(StandardCharsets.UTF_8)
+    }
+
+    private fun buildUrlWithParams(baseUrl: String, params: JSObject, shouldEncode: Boolean): String {
+        if (params.length() == 0) return baseUrl
+
+                val queryParams = mutableListOf<String>()
+        val paramMap = params.toParamsMap()
+        paramMap.forEach { (key, values) ->
+            values.forEach { value ->
+                val encodedKey = if (shouldEncode) URLEncoder.encode(key, StandardCharsets.UTF_8) else key
+                val encodedValue = if (shouldEncode) URLEncoder.encode(value, StandardCharsets.UTF_8) else value
+                queryParams.add("$encodedKey=$encodedValue")
+            }
+        }
+
+        if (queryParams.isEmpty()) return baseUrl
+        val separator = if (baseUrl.contains("?")) "&" else "?"
+        return "$baseUrl$separator${queryParams.joinToString("&")}"
+    }
+
+    private fun performDownloadWithRequestBody(
+        call: PluginCall,
+        url: String,
+        filePath: String,
+        progress: Boolean,
+        body: ByteArray
+    ) {
+        ioScope.launch {
+            var connection: HttpURLConnection? = null
+            try {
+                val headers = call.getObject("headers") ?: JSObject()
+                val params = call.getObject("params") ?: JSObject()
+                val method = call.getString("method") ?: "GET"
+                val shouldEncodeUrlParams = call.getBoolean("shouldEncodeUrlParams", true) ?: true
+                val targetUrl = buildUrlWithParams(url, params, shouldEncodeUrlParams)
+                val readTimeout = call.getInt("readTimeout", DEFAULT_TIMEOUT_MS) ?: DEFAULT_TIMEOUT_MS
+                val connectTimeout = call.getInt("connectTimeout", DEFAULT_TIMEOUT_MS) ?: DEFAULT_TIMEOUT_MS
+                val disableRedirects = call.getBoolean("disableRedirects", false) ?: false
+
+                connection = (URL(targetUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = method
+                    this.readTimeout = readTimeout
+                    this.connectTimeout = connectTimeout
+                    instanceFollowRedirects = !disableRedirects
+                    doOutput = true
+                }
+
+                headers.toMap().forEach { (key, value) ->
+                    connection.setRequestProperty(key, value)
+                }
+
+                BufferedOutputStream(connection.outputStream).use { output ->
+                    output.write(body)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    val responseBody = connection.errorStream?.bufferedReader()?.readText()
+                    val errorInfo = FileTransferErrors.httpError(
+                        responseCode.toString(),
+                        "HTTP error: $responseCode",
+                        responseBody,
+                        connection.headerFields
+                    ).copy(source = url, target = filePath)
+                    call.sendError(errorInfo)
+                    return@launch
+                }
+
+                val normalizedFilePath = filePath.toUri().path ?: filePath
+                val targetFile = File(normalizedFilePath)
+                targetFile.parentFile?.mkdirs()
+
+                val contentLength = connection.contentLengthLong
+                val lengthComputable = contentLength > 0
+                var totalBytesRead = 0L
+
+                BufferedInputStream(connection.inputStream).use { input ->
+                    FileOutputStream(targetFile).use { fileOutput ->
+                        BufferedOutputStream(fileOutput).use { output ->
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Int
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                totalBytesRead += bytesRead
+                                if (progress) {
+                                    notifyProgress(
+                                        "download",
+                                        url,
+                                        IONFLTRProgressStatus(
+                                            bytes = totalBytesRead,
+                                            contentLength = contentLength,
+                                            lengthComputable = lengthComputable
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (progress) {
+                    notifyProgress(
+                        "download",
+                        url,
+                        IONFLTRProgressStatus(
+                            bytes = totalBytesRead,
+                            contentLength = totalBytesRead,
+                            lengthComputable = true
+                        ),
+                        forceUpdate = true
+                    )
+                }
+
+                if (isPublicDirectory(filePath)) {
+                    MediaScannerConnection.scanFile(context, arrayOf(filePath), null, null)
+                }
+
+                call.resolve(JSObject().apply { put("path", filePath) })
+            } catch (error: Exception) {
+                val errorInfo = error.toFileTransferError().copy(source = url, target = filePath)
+                call.sendError(errorInfo)
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
     @PluginMethod
     fun downloadFile(call: PluginCall) {
         val url = call.getString("url") ?: run {
@@ -150,6 +298,11 @@ class FileTransferPlugin : Plugin() {
         }
 
         val progress = call.getBoolean("progress", false) ?: false
+        val requestBody = extractRequestBody(call)
+        if (requestBody != null) {
+            performDownloadWithRequestBody(call, url, filePath, progress, requestBody)
+            return
+        }
         val httpOptions = createHttpOptions(call, "GET")
 
         val options = IONFLTRDownloadOptions(

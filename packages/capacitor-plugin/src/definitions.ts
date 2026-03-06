@@ -1,11 +1,6 @@
-import {
-  HttpOptions,
-  HttpParams,
-  HttpHeaders,
-  PluginListenerHandle,
-} from "@capacitor/core";
+import { HttpParams, HttpHeaders, PluginListenerHandle } from "@capacitor/core";
 
-export interface DownloadFileOptions extends HttpOptions {
+export interface DownloadFileOptions {
   /**
    * The URL to download the file from.
    * @since 1.0.0
@@ -30,6 +25,12 @@ export interface DownloadFileOptions extends HttpOptions {
    * @since 1.0.0
    */
   method?: string;
+  /**
+   * Request body to send with the HTTP request.
+   * Useful when using methods like POST or PUT for downloads.
+   * @since 1.0.0
+   */
+  data?: string;
   /**
    * URL parameters to append to the request.
    * This `HttpParams` interface comes from `@capacitor/core`.
@@ -86,7 +87,7 @@ export interface DownloadFileResult {
   blob?: Blob;
 }
 
-export interface UploadFileOptions extends HttpOptions {
+export interface UploadFileOptions {
   /**
    * The URL to upload the file to.
    * @since 1.0.0
