@@ -72,7 +72,7 @@ class FileTransferPlugin : Plugin() {
     private fun JSObject.toMap(): Map<String, String> {
         val map = mutableMapOf<String, String>()
         keys().forEach { key ->
-            map[key] = getString(key).orEmpty()
+            map[key] = opt(key)?.toString().orEmpty()
         }
         return map
     }
@@ -197,7 +197,7 @@ class FileTransferPlugin : Plugin() {
                     this.readTimeout = readTimeout
                     this.connectTimeout = connectTimeout
                     instanceFollowRedirects = !disableRedirects
-                    doOutput = true
+                    doOutput = body.isNotEmpty()
                 }
 
                 headers.toMap().forEach { (key, value) ->

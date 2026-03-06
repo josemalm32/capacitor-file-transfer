@@ -117,7 +117,8 @@ public class FileTransferPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let shouldTrackProgress = prepData.shouldTrackProgress
-        URLSession.shared.downloadTask(with: request) { temporaryURL, response, error in
+        let session = URLSession(configuration: .default)
+        session.downloadTask(with: request) { temporaryURL, response, error in
             if let error = error {
                 call.sendError(error, source: prepData.serverURL.absoluteString, target: prepData.fileURL.absoluteString)
                 return
